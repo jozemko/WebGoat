@@ -2,22 +2,42 @@ on:
   workflow_dispatch: {}
   pull_request: {}
   push:
-    branches:
-    - main
-    - master
-    paths:
-    - .github/workflows/semgrep.yml
+    branches: [main, master]
+    paths: [.github/workflows/semgrep.yml]
+
 name: Semgrep
 jobs:
-  semgrep:
-    name: semgrep/ci
+  buildmavenDepTree:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      # Create a dependency tree file next to each pom.xml
+      - name: Build dependency trees
+        run: mvn dependency:tree -DoutputFile=maven_dep_tree.txt -Dmaven.test.skip=true
+      - name: Archive dep trees
+        run: find . -type f -name 'maven_dep_tree.txt' -exec zip -r archive.zip {} +
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maven-deps
+          path: archive.zip
+
+  semgrep:
+    needs: buildmavenDepTree
+    runs-on: ubuntu-latest
     env:
       SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
     container:
       image: semgrep/semgrep
     steps:
-    - uses: actions/checkout@v4
-    - run: semgrep ci --supply-chain
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: maven-deps
+      - run: |
+          unzip -o archive.zip
+          semgrep ci --supply-chain
